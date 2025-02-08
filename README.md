@@ -44,3 +44,6 @@ Client arguments:
 - Store messages for offline users
 - Read message history
 - Real-time message delivery
+
+## Testing
+`export PYTHONPATH=$(pwd)`
