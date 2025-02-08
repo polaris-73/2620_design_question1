@@ -1,8 +1,7 @@
 import pytest
 from server import ChatServer
 from protocol import Message, JSONProtocol
-from unittest.mock import MagicMock
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 @pytest.fixture
 def chat_server():
