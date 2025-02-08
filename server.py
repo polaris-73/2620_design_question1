@@ -35,6 +35,7 @@ class ChatServer:
                     break
                 msg_length = int.from_bytes(length_bytes, 'big')
                 data = client.recv(msg_length)
+                print('if not data', data)
                 if not data:
                     break
                 message = self.protocol.decode(data)
