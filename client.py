@@ -88,6 +88,14 @@ class ChatClientGUI:
         right_frame = ttk.Frame(self.chat_frame)
         right_frame.grid(row=0, column=1)
         
+        # User filter
+        filter_frame = ttk.Frame(right_frame)
+        filter_frame.pack()
+        ttk.Label(filter_frame, text="Filter Users:").pack(side=tk.LEFT)
+        self.filter_entry = ttk.Entry(filter_frame)
+        self.filter_entry.pack(side=tk.LEFT, fill='x', expand=True)
+        ttk.Button(filter_frame, text="Filter", command=self.filter_users).pack(side=tk.RIGHT)
+        
         # Users list
         ttk.Label(right_frame, text="Online Users:").pack()
         self.users_listbox = tk.Listbox(right_frame, height=10)
@@ -233,6 +241,14 @@ class ChatClientGUI:
     def handle_logout(self):         
         m = Message(cmd="logoff", src=self.username)
         self.send_msg(m)
+
+    def filter_users(self):
+        filter_text = self.filter_entry.get()
+        if not filter_text:
+            self.refresh_users()  # If filter is empty, show all users
+        else:
+            m = Message(cmd="list", body=filter_text)
+            self.send_msg(m)
 
     def run(self):
         self.root.mainloop()

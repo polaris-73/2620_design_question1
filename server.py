@@ -25,7 +25,7 @@ class ChatServer:
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((host, port))
         self.current_users = {}
-        
+    
     def handle_client(self, client: socket.socket, address):
         print(f"Connection from {address}")
         try:
@@ -35,9 +35,9 @@ class ChatServer:
                     break
                 msg_length = int.from_bytes(length_bytes, 'big')
                 data = client.recv(msg_length)
-                print('if not data', data)
-                if not data:
-                    break
+                # print('if not data', data)
+                # if not data:
+                #     break
                 message = self.protocol.decode(data)
                 # print(message)
                 cmd = message.cmd
@@ -51,6 +51,7 @@ class ChatServer:
                         response = Message(cmd="create", body="Username already exists", error=True)
                     else:
                         self.users[username] = message.body
+                        self.messages[username] = []  # Initialize message queue for new user
                         response = Message(cmd="create", body="Account created", to=username)
                 elif cmd == "login":
                     if username not in self.users:
@@ -76,34 +77,37 @@ class ChatServer:
                 elif cmd == "send":
                     recipient = message.to
                     content = message.body
-                    if recipient not in self.users:
-                        response = Message(cmd="send", body="Recipient not found", error=True)
-                        
-                    # Sending message if recipent online, else store in messages    
-                    if recipient in self.current_users:
-                        recipient_socket = self.current_users[recipient]
-                        notification = Message(cmd="deliver", src=username, body=content)
-                        encoded = self.protocol.encode(notification)
-                        recipient_socket.send(len(encoded).to_bytes(4, 'big'))
-                        recipient_socket.send(encoded)
+                    if not content or not recipient:
+                        response = Message(cmd="send", body="Message content and recipient are required", error=True)
                     else:
-                        self.messages[recipient].append((username, content))
-                    response = Message(cmd="send", body="Message sent successfully")
+                        # Sending message if recipient online, else store in messages    
+                        if recipient in self.current_users:
+                            recipient_socket = self.current_users[recipient]
+                            notification = Message(cmd="deliver", src=username, body=content)
+                            encoded = self.protocol.encode(notification)
+                            recipient_socket.send(len(encoded).to_bytes(4, 'big'))
+                            recipient_socket.send(encoded)
+                        else:
+                            if recipient not in self.messages:
+                                self.messages[recipient] = []
+                            self.messages[recipient].append((username, content))
+                        response = Message(cmd="send", body="Message sent successfully")
                 elif cmd == "deliver":
-                    sender = message.src
-                    content = message.body
-                    messages = self.messages[username]
-                    for sender, content in messages:
-                        notification = Message(cmd="deliver", src=sender, body=content)
-                        encoded = self.protocol.encode(notification)
-                        client.send(len(encoded).to_bytes(4, 'big'))
-                        client.send(encoded)
-                    self.messages[username] = []
+                    if username in self.messages:
+                        messages = self.messages[username]
+                        for sender, content in messages:
+                            notification = Message(cmd="deliver", src=sender, body=content)
+                            encoded = self.protocol.encode(notification)
+                            client.send(len(encoded).to_bytes(4, 'big'))
+                            client.send(encoded)
+                        self.messages[username] = []
                 elif cmd == "delete":
                     if username not in self.users:
                         response = Message(cmd="delete", body="User does not exist", error=True)
                     else:
                         self.users.pop(username)
+                        if username in self.messages:
+                            self.messages.pop(username)
                         response = Message(cmd="delete", body="Account deleted")
 
                     
