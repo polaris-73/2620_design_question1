@@ -5,6 +5,8 @@ def test_json_protocol_encoding_decoding():
     msg = Message(cmd="send", src="user1", to="user2", body="Hello", error=False)
     encoded = JSONProtocol.encode(msg)
     decoded = JSONProtocol.decode(encoded)
+    print('msg', msg)
+    print('decoded', decoded)
     assert msg == decoded
 
 def test_custom_protocol_encoding_decoding():

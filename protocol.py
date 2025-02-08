@@ -32,7 +32,7 @@ class JSONProtocol:
         parsed = json.loads(data.decode())
         return Message(
             cmd=parsed['cmd'],
-            src=parsed.get('from', ''),
+            src=parsed.get('src', ''),
             to=parsed.get('to', ''),
             body=parsed.get('body', ''),
             error=parsed.get('error', False)
