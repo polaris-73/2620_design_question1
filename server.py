@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Dict, Optional
 from datetime import datetime
 from protocol import Message, JSONProtocol, CustomProtocol
+import uuid
 
 class ChatServer:
     """ Chat server """
@@ -47,70 +48,22 @@ class ChatServer:
 
                 # Getting the response from the server
                 if cmd == "create":
-                    if username in self.users:
-                        response = Message(cmd="create", body="Username already exists", error=True)
-                    else:
-                        self.users[username] = message.body
-                        self.messages[username] = []  # Initialize message queue for new user
-                        response = Message(cmd="create", body="Account created", to=username)
+                    response = self.handle_create(username, message, client)
                 elif cmd == "login":
-                    if username not in self.users:
-                        response = Message(cmd="login", body="Username/Password error", error=True)
-                    elif username in self.current_users:
-                        response = Message(cmd="login", body="Already logged in elsewhere", error=True)
-                    elif self.users[username] != message.body:
-                        response = Message(cmd="login", body="Username/Password error", error=True)
-                    else:
-                        self.current_users[username] = client
-                        response = Message(cmd="login", body=f"Login successful", to=username)
+                    response = self.handle_login(username, message, client)
                 elif cmd == "logoff":
-                    if username in self.current_users:
-                        self.current_users.pop(username)
-                        response = Message(cmd="logoff", body="Logged out successfully")
+                    response = self.handle_logoff(username, message)
                 elif cmd == "list":
-                    pattern = message.body if message.body else "all"
-                    matching_users = []
-                    for user in self.users.keys():
-                        if pattern == "all" or pattern in user:
-                            matching_users.append(user)
-                    response = Message(cmd="list", body=",".join(matching_users))
+                    response = self.handle_list(message)
                 elif cmd == "send":
-                    recipient = message.to
-                    content = message.body
-                    if not content or not recipient:
-                        response = Message(cmd="send", body="Message content and recipient are required", error=True)
-                    else:
-                        # Sending message if recipient online, else store in messages    
-                        if recipient in self.current_users:
-                            recipient_socket = self.current_users[recipient]
-                            notification = Message(cmd="deliver", src=username, body=content)
-                            encoded = self.protocol.encode(notification)
-                            recipient_socket.send(len(encoded).to_bytes(4, 'big'))
-                            recipient_socket.send(encoded)
-                        else:
-                            if recipient not in self.messages:
-                                self.messages[recipient] = []
-                            self.messages[recipient].append((username, content))
-                        response = Message(cmd="send", body="Message sent successfully")
+                    response = self.handle_send(username, message)
                 elif cmd == "deliver":
-                    if username in self.messages:
-                        messages = self.messages[username]
-                        for sender, content in messages:
-                            notification = Message(cmd="deliver", src=sender, body=content)
-                            encoded = self.protocol.encode(notification)
-                            client.send(len(encoded).to_bytes(4, 'big'))
-                            client.send(encoded)
-                        self.messages[username] = []
+                    response = self.handle_deliver(username, message, client)
                 elif cmd == "delete":
-                    if username not in self.users:
-                        response = Message(cmd="delete", body="User does not exist", error=True)
-                    else:
-                        self.users.pop(username)
-                        if username in self.messages:
-                            self.messages.pop(username)
-                        response = Message(cmd="delete", body="Account deleted")
+                    response = self.handle_delete(username, message)
+                elif cmd == "delete_msgs":
+                    response = self.handle_delete_messages(username, message)
 
-                    
                 if response:
                     encoded = self.protocol.encode(response)
                     # Send message length first
@@ -144,7 +97,121 @@ class ChatServer:
             self.running = False
             self.server.close()
     
+    def handle_create(self, username: str, message: Message, client: socket.socket):
+        if username in self.users:
+            response = Message(cmd="create", body="Username already exists", error=True)
+        else:
+            self.users[username] = message.body
+            self.messages[username] = []  # Initialize message queue for new user
+            response = Message(cmd="create", body="Account created", to=username)
+            self.current_users[username] = client
+        return response
+    def handle_login(self, username: str, message: Message, client: socket.socket):
+        if username not in self.users:
+            response = Message(cmd="login", body="Username/Password error", error=True)
+        elif self.users[username] != message.body:
+            response = Message(cmd="login", body="Username/Password error", error=True)
+        else:
+            self.current_users[username] = client
+            # Initialize message queue if not exists
+            if username not in self.messages:
+                self.messages[username] = []
+            response = Message(cmd="login", body=f"Login successful", to=username)
+        return response
+    def handle_logoff(self, username: str, message: Message):
+        if username in self.current_users:
+            self.current_users.pop(username)
+            response = Message(cmd="logoff", body="Logged out successfully")
+        return response
 
+    def handle_list(self, message: Message):
+        pattern = message.body if message.body else "all"
+        matching_users = []
+        for user in self.users.keys():
+            if pattern == "all" or pattern in user:
+                matching_users.append(user)
+        response = Message(cmd="list", body=",".join(matching_users))
+        return response
+
+    def handle_send(self, username: str, message: Message):
+        recipient = message.to
+        content = message.body
+        if not content or not recipient:
+            response = Message(cmd="send", body="Message content and recipient are required", error=True)
+        elif recipient not in self.users:
+            response = Message(cmd="send", body="Recipient not found", error=True)
+        else:
+            try:
+                # Use client-provided message ID
+                msg_id = message.msg_ids[0] if message.msg_ids else None
+                if recipient in self.current_users:
+                    # Deliver immediately if recipient is online
+                    recipient_socket = self.current_users[recipient]
+                    notification = Message(cmd="deliver", src=username, body=content, msg_ids=[msg_id] if msg_id else None)
+                    try:
+                        encoded = self.protocol.encode(notification)
+                        recipient_socket.send(len(encoded).to_bytes(4, 'big'))
+                        recipient_socket.send(encoded)
+                        print(f"Message delivered immediately to {recipient}")
+                    except Exception as e:
+                        print(f"Failed to deliver message to {recipient}: {e}")
+                        # If immediate delivery fails, store the message
+                        if recipient not in self.messages:
+                            self.messages[recipient] = []
+                        self.messages[recipient].append((msg_id, username, content))
+                else:
+                    # Store message for offline recipient
+                    if recipient not in self.messages:
+                        self.messages[recipient] = []
+                    self.messages[recipient].append((msg_id, username, content))
+                    print(f"Message stored for offline user {recipient}")
+                response = Message(cmd="send", body="Message sent successfully")
+            except Exception as e:
+                print(f"Error in handle_send: {e}")
+                response = Message(cmd="send", body="Failed to send message", error=True)
+        return response
+    def handle_deliver(self, username: str, message: Message, client: socket.socket):
+
+        messages = self.messages[username]
+
+        # Apply limit if specified
+        limit = message.limit if message.limit > 0 else len(messages)
+        messages_to_send = messages[:limit]
+        
+        for msg_id, sender, content in messages_to_send:
+            notification = Message(cmd="deliver", src=sender, body=content, msg_ids=[msg_id])
+            encoded = self.protocol.encode(notification)
+            client.send(len(encoded).to_bytes(4, 'big'))
+            client.send(encoded)
+        
+        # Keep remaining messages
+        self.messages[username] = messages[limit:]
+        return None
+    def handle_delete_messages(self, username: str, message: Message):
+        if not message.msg_ids:
+            return Message(cmd="delete_msgs", body="No message IDs specified", error=True)
+        
+        if username in self.messages:
+            # Filter out messages that should be deleted
+            self.messages[username] = [
+                msg for msg in self.messages[username] 
+                if msg[0] not in message.msg_ids
+            ]
+        return Message(cmd="delete_msgs", body="Messages deleted successfully")
+    def handle_delete(self, username: str, message: Message):
+        if username not in self.users:
+            response = Message(cmd="delete", body="User does not exist", error=True)
+        else:
+            self.users.pop(username)
+            if username in self.current_users:
+                self.current_users.pop(username)
+            if username in self.messages:
+                self.messages.pop(username)
+            # Remove user's messages from other users' queues
+            for user_msgs in self.messages.values():
+                user_msgs[:] = [msg for msg in user_msgs if msg[1] != username]
+            response = Message(cmd="delete", body="Account deleted")
+        return response
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Chat Server')
     parser.add_argument('--host', default='localhost')

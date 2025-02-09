@@ -7,6 +7,7 @@ import sys
 import argparse
 import signal
 from datetime import datetime
+import uuid
 from protocol import Message, JSONProtocol, CustomProtocol
 
 class ChatClientGUI:
@@ -18,6 +19,7 @@ class ChatClientGUI:
         self.username = None
         self.running = True
         self.receive_thread = None
+        self.message_ids = {}  
     
         self.root = tk.Tk()
         self.root.title("Chat Bot Client!")
@@ -73,8 +75,17 @@ class ChatClientGUI:
         left_frame = ttk.Frame(self.chat_frame)
         left_frame.grid()
 
-        self.chat_display = scrolledtext.ScrolledText(left_frame, wrap=tk.WORD, height=20)
-        self.chat_display.pack()
+        # Message display frame
+        msg_frame = ttk.Frame(left_frame)
+        msg_frame.pack(fill='both', expand=True)
+
+        # Chat display with message selection
+        self.chat_display = scrolledtext.ScrolledText(msg_frame, wrap=tk.WORD, height=20)
+        self.chat_display.pack(side=tk.LEFT, fill='both', expand=True)
+        
+        # Message selection listbox
+        self.msg_select = tk.Listbox(msg_frame, width=3, selectmode=tk.MULTIPLE)
+        self.msg_select.pack(side=tk.RIGHT, fill='y')
         
         # Message input area
         input_frame = ttk.Frame(left_frame)
@@ -99,13 +110,24 @@ class ChatClientGUI:
         # Users list
         ttk.Label(right_frame, text="Online Users:").pack()
         self.users_listbox = tk.Listbox(right_frame, height=10)
-        self.users_listbox.pack()
+        self.users_listbox.pack(fill='both', expand=True)
+        
+        # Message controls
+        message_controls = ttk.Frame(right_frame)
+        message_controls.pack(fill='x', pady=5)
+        
+        ttk.Label(message_controls, text="Messages to read:").pack(side=tk.LEFT)
+        self.msg_limit = ttk.Spinbox(message_controls, from_=1, to=100, width=5)
+        self.msg_limit.pack(side=tk.LEFT, padx=5)
+        self.msg_limit.set(10)  
+        
+        ttk.Button(message_controls, text="Read Messages", command=self.read_messages).pack(side=tk.LEFT, padx=5)
+        ttk.Button(message_controls, text="Delete Selected", command=self.delete_messages).pack(side=tk.LEFT)
         
         # Control buttons
-        ttk.Button(right_frame, text="Refresh Users", command=self.refresh_users).pack()
-        ttk.Button(right_frame, text="Read Messages", command=self.read_messages).pack()
-        ttk.Button(right_frame, text="Delete Account", command=self.handle_delete_account).pack()
-        ttk.Button(right_frame, text="Logout", command=self.handle_logout).pack()
+        ttk.Button(right_frame, text="Refresh Users", command=self.refresh_users).pack(fill='x', pady=2)
+        ttk.Button(right_frame, text="Delete Account", command=self.handle_delete_account).pack(fill='x', pady=2)
+        ttk.Button(right_frame, text="Logout", command=self.handle_logout).pack(fill='x', pady=2)
 
     def connect(self):
         # Connect to server, end when server is end
@@ -154,8 +176,23 @@ class ChatClientGUI:
                 self.refresh_users()
         
         elif msg.cmd == "deliver":
-            self.chat_display.insert(tk.END, f"[{msg.src}: {msg.body}\n")
-            self.chat_display.see(tk.END)
+            # Store message ID for potential deletion
+            if msg.msg_ids:
+                msg_id = msg.msg_ids[0]
+                display_text = f"{msg.src}: {msg.body}\n"
+                self.chat_display.insert(tk.END, display_text)
+                # Add checkbox for message selection
+                self.msg_select.insert(tk.END, " ")
+                # Store the message ID with its position
+                line_num = int(float(self.chat_display.index("end-1c").split('.')[0])) - 1
+                self.message_ids[str(line_num)] = msg_id
+                self.chat_display.see(tk.END)
+                self.msg_select.see(tk.END)
+            else:
+                self.chat_display.insert(tk.END, f"{msg.src}: {msg.body}\n")
+                self.msg_select.insert(tk.END, " ")
+                self.chat_display.see(tk.END)
+                self.msg_select.see(tk.END)
         
         elif msg.cmd == "create":
             if msg.error:
@@ -188,6 +225,12 @@ class ChatClientGUI:
             self.username = None
             self.notebook.tab(1, state='disabled')
             self.notebook.select(0)
+        
+        elif msg.cmd == "delete_msgs":
+            if msg.error:
+                messagebox.showerror("Delete Failed", msg.body)
+            else:
+                messagebox.showinfo("Success", msg.body)
 
     def handle_login(self):
         user = self.username_entry.get()
@@ -217,21 +260,75 @@ class ChatClientGUI:
         content = self.msg_entry.get()
         if not content:
             return
-        m = Message(cmd="send", src=self.username, to=recipient, body=content)
+            
+        # Generate message ID
+        msg_id = str(uuid.uuid4())
+        m = Message(cmd="send", src=self.username, to=recipient, body=content, msg_ids=[msg_id])
         self.send_msg(m)
         
         # Add message to chat display
-        self.chat_display.insert(tk.END, f"[{self.username} -> {recipient}: {content}\n")
+        self.chat_display.insert(tk.END, f"[{self.username} -> {recipient}]: {content}\n")
+
+        self.msg_select.insert(tk.END, " ")
+        line_num = int(float(self.chat_display.index("end-1c").split('.')[0])) - 1
+        self.message_ids[str(line_num)] = msg_id
         self.chat_display.see(tk.END)
         self.msg_entry.delete(0, tk.END)
+        self.msg_select.see(tk.END)
 
     def refresh_users(self):
         m = Message(cmd="list", body="all")
         self.send_msg(m)
 
     def read_messages(self):
-        m = Message(cmd="deliver", src=self.username)
+        """Read messages with limit"""
+        try:
+            limit = int(self.msg_limit.get())
+            if limit < 1:
+                limit = 1
+            elif limit > 100:
+                limit = 100
+        except ValueError:
+            limit = 10
+        
+        m = Message(cmd="deliver", src=self.username, limit=limit)
         self.send_msg(m)
+
+    def delete_messages(self):
+        """Delete selected messages"""
+        try:
+            selected = self.msg_select.curselection()
+            if not selected:
+                messagebox.showinfo("Info", "Please select messages to delete")
+                return
+            msg_ids = []
+            for index in selected:
+                if str(index) in self.message_ids:
+                    msg_ids.append(self.message_ids[str(index)])
+            
+            if not msg_ids:
+                messagebox.showinfo("Info", "No deletable messages selected")
+                return
+            m = Message(cmd="delete_msgs", src=self.username, msg_ids=msg_ids)
+            self.send_msg(m)
+            
+            # Remove deleted messages from display
+            for index in reversed(selected):
+                self.chat_display.delete(f"{index+1}.0", f"{index+2}.0")
+                self.msg_select.delete(index)
+                self.message_ids.pop(str(index), None)
+            new_message_ids = {}
+            for old_index in self.message_ids:
+                old_idx = int(old_index)
+                new_idx = old_idx
+                for del_idx in selected:
+                    if old_idx > del_idx:
+                        new_idx -= 1
+                new_message_ids[str(new_idx)] = self.message_ids[old_index]
+            self.message_ids = new_message_ids
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete messages: {str(e)}")
 
     def handle_delete_account(self):
         if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete your account?"):

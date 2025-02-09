@@ -22,17 +22,17 @@ Messages are encoded as JSON objects with the following fields:
 Comparison:
 JSON encoded message (bytes):
 ```
-json_msg = {"cmd": "login", "src": "alice", "to": "server", "body": "This is a test message", "error": False}
+json_msg = {"cmd": "login", "src": "alice", "to": "server", "body": "This is a test message", "error": False, "msg_ids": '8d4a8912-5776-4438-ac14-8b791cfc63f2', "limit": 10}
 ```
-Size: 98 bytes
+Size: 162 bytes
 
 Custom encoded message (bytes):
 ```
-custom_msg = b'\x05login\x05alice\x06server\x00\x1bThis is a test message\x00'
+custom_msg = b'\x05login\x05alice\x06server\x00\x16This is a test message\x00\x00&"8d4a8912-5776-4438-ac14-8b791cfc63f2"\x00\n'
 ```
-Size: 44 bytes
+Size: 86 bytes
 
 Comparison:
-- JSON protocol size:   98 bytes
-- Custom protocol size: 44 bytes
+- JSON protocol size:   162 bytes
+- Custom protocol size: 86 bytes
 
