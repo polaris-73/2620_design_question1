@@ -352,7 +352,7 @@ class ChatClientGUI:
 
 def main():
     parser = argparse.ArgumentParser(description="Chat Client GUI")
-    parser.add_argument('--host', default='localhost')
+    parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=5000)
     parser.add_argument('--custom_mode', action='store_true')
     

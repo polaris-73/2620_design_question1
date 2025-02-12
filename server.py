@@ -24,7 +24,10 @@ class ChatServer:
         self.messages = OrderedDict()
         self.running = True
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.bind((host, port))
+        # Allow reuse of the address
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Bind to all available interfaces
+        self.server.bind(('0.0.0.0', port))
         self.current_users = {}
     
     def handle_client(self, client: socket.socket, address):
